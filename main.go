@@ -6,6 +6,11 @@ import (
 	"sync"
 )
 
+const (
+	Attempts int = iota
+	Retry
+)
+
 type Backend struct {
 	URL          *url.URL
 	Alive        bool
@@ -62,6 +67,22 @@ func (b *Backend) IsAlive() (alive bool) {
 	alive = b.Alive
 	b.mux.RUnlock()
 	return
+}
+
+// GetAttemptsFromContext returns the attempts for request
+func GetAttemptsFromContext(r *http.Request) int {
+	if attempts, ok := r.Context().Value(Attempts).(int); ok {
+		return attempts
+	}
+	return 1
+}
+
+// GetRetryFromContext returns the attempts for request
+func GetRetryFromContext(r *http.Request) int {
+	if retry, ok := r.Context().Value(Retry).(int); ok {
+		return retry
+	}
+	return 0
 }
 
 // lb func load balances the incoming requests
