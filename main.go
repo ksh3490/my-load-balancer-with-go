@@ -126,3 +126,16 @@ func isBackendAlive(u *url.URL) bool {
 	_ = conn.Close() // close it, we don't need to maintain this connection
 	return true
 }
+
+// healthCheck runs a routine for check status of the backends every 2 mins
+func healthCheck() {
+	t := time.NewTicker(time.Minute * 2)
+	for {
+		select {
+		case <-t.c:
+			log.Println("Starting health check...")
+			serverPool.HealthCheck()
+			log.Println("Health check completed")
+		}
+	}
+}
