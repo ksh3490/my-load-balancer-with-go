@@ -54,6 +54,19 @@ func (s *ServerPool) GetNextPeer() *Backend {
 	return nil
 }
 
+// HealthCheck pring the backends and update the status
+func (s *ServerPool) HealthCheck() {
+	for _, b := range s.backends {
+		status := "up"
+		alive := isBackendAlive(b.URL)
+		b.SetAlive(alive)
+		if !alive {
+			status = "down"
+		}
+		log.Printf("%s [%s]\n", b.URL, status)
+	}
+}
+
 // SetAlive func for this backend
 func (b *Backend) SetAlive(alive bool) {
 	b.mux.Lock()
@@ -102,8 +115,8 @@ func lb(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Service not available", http.StatusServiceUnavailable)
 }
 
-// IsBackendAlive checks whether a backend is alive by establishing a TCP connection
-func IsBackendAlive(u *url.URL) bool {
+// isBackendAlive checks whether a backend is alive by establishing a TCP connection
+func isBackendAlive(u *url.URL) bool {
 	timeout := 2 * time.Second
 	conn, err := net.DialTimeout("tcp", u.Host, timeout)
 	if err != nil {
