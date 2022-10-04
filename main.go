@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -29,9 +35,24 @@ rp := httputil.NewSingleHostReverseProxy(u)
 // Initialize your server and add this as handler
 http.HandlerFunc(rp.ServeHTTP)
 
+// Add backend to the sesrver pool
+func (s *ServerPool) AddBackend(backend *Backend) {
+	s.backends = append(s.backends, backend)
+}
+
 // Increase the current value by one atomically and Return the index by modding with the slice length
 func (s *ServerPool) NextIndex() int {
 	return int(atomic.AddUint64(&s.current, uint64(1))) % uint64(len(s.backends))
+}
+
+//MarkBackendStatus changes a status of a backend
+func (s *ServerPool) MarkBackendStatus(backendUrl *url.URL, alive bool) {
+	for _, b := range s.backends {
+		if b.URL.String() == backendUrl.String() {
+			b.SetAlive(alive)
+			break
+		}
+	}
 }
 
 // GetNextPeer will return next active peer to take a connection
@@ -137,5 +158,72 @@ func healthCheck() {
 			serverPool.HealthCheck()
 			log.Println("Health check completed")
 		}
+	}
+}
+
+var serverPool ServerPool
+
+func main() {
+	var serverList string
+	var port int
+	flag.StringVar(&serverList, "backends", "", "Load Balanced Backends, Use commas to seperate them")
+	flag.IntVar(&port, "port", 3030, "Port to serve")
+	flag.Parse()
+
+	if len(serverList) == 0 {
+		log.Fatal("Please provide one or more backends to load balance")
+	}
+
+	// Parse servers
+	tokens := strings.Split(serverList, ",")
+	for _, tok := range tokens {
+		serverUrl, err := url.Parse(tok)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		proxy := httputil.NewSingleHostReverseProxy(serverUrl)
+		proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Reuest, e error) {
+			log.Printf("[%s] %s\n", serverUrl.Host, e.Error())
+			retries := GetRetryFromContext(request)
+			if retries < 3 {
+				select {
+				case <-time.After(10 * time.Millisecond):
+					ctx := context.WithValue(request.Context(), Retry, retries+1)
+					proxy.ServeHTTP(writer, request.WithContext(ctx))
+				}
+				return
+			}
+
+			// After 3 retries, mark this backend as down
+			serverPool.MarkBackendStatus(serverUrl, false)
+
+			// If the same request routing for few attempts with different backends, increase the count
+			attempts := GetAttemptsFromContext(request)
+			log.Printf("%s(%s) Attempting retry %d\n", request.RemoteAddr, request.URL.Path, attempts)
+			ctx := context.WithValue(request.Context(), Attempts, attempts+1)
+			lb(writer, request.WithContext(ctx))
+		}
+
+		serverPool.AddBackend(&Backend{
+			URL: serverUrl,
+			Alive: true,
+			ReverseProxy: proxy,
+		})
+		log.Printf("Configured server: %s\n", serverUrl)
+	}
+
+	// Create http server
+	server := http.Server{
+		Addr: fmt.Sprintf(":%d", port),
+		Handler: http.HandleFunc(lb),
+	}
+
+	// Start health checking
+	go healthCheck()
+
+	log.Printf("Load Balancer started at :%d\n", port)
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatal(err)
 	}
 }
