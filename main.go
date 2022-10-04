@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,14 +29,14 @@ type Backend struct {
 
 type ServerPool struct {
 	backends []*Backend
-	current uint64
+	current  uint64
 }
 
-u, _ := url.Parse("http://localhost:8080")
-rp := httputil.NewSingleHostReverseProxy(u)
+// u, _ := url.Parse("http://localhost:8080")
+// rp := httputil.NewSingleHostReverseProxy(u)
 
-// Initialize your server and add this as handler
-http.HandlerFunc(rp.ServeHTTP)
+// // Initialize your server and add this as handler
+// http.HandlerFunc(rp.ServeHTTP)
 
 // Add backend to the sesrver pool
 func (s *ServerPool) AddBackend(backend *Backend) {
@@ -57,11 +60,11 @@ func (s *ServerPool) MarkBackendStatus(backendUrl *url.URL, alive bool) {
 
 // GetNextPeer will return next active peer to take a connection
 func (s *ServerPool) GetNextPeer() *Backend {
-	 // Loop entire backends to find out on Alive Backend
+	// Loop entire backends to find out on Alive Backend
 	next := s.NextIndex()
 
 	// Start from next and move a full cycle
-	l := len(s.backends) + next 
+	l := len(s.backends) + next
 	for i := next; i < l; i++ {
 		idx := i % len(s.backends) // Take an index by modding with slice length
 		// if you have an alive backend, use it and store if it's not the original one
@@ -183,7 +186,7 @@ func main() {
 		}
 
 		proxy := httputil.NewSingleHostReverseProxy(serverUrl)
-		proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Reuest, e error) {
+		proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, e error) {
 			log.Printf("[%s] %s\n", serverUrl.Host, e.Error())
 			retries := GetRetryFromContext(request)
 			if retries < 3 {
@@ -206,8 +209,8 @@ func main() {
 		}
 
 		serverPool.AddBackend(&Backend{
-			URL: serverUrl,
-			Alive: true,
+			URL:          serverUrl,
+			Alive:        true,
 			ReverseProxy: proxy,
 		})
 		log.Printf("Configured server: %s\n", serverUrl)
@@ -215,7 +218,7 @@ func main() {
 
 	// Create http server
 	server := http.Server{
-		Addr: fmt.Sprintf(":%d", port),
+		Addr:    fmt.Sprintf(":%d", port),
 		Handler: http.HandleFunc(lb),
 	}
 
