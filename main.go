@@ -45,7 +45,7 @@ func (s *ServerPool) AddBackend(backend *Backend) {
 
 // Increase the current value by one atomically and Return the index by modding with the slice length
 func (s *ServerPool) NextIndex() int {
-	return int(atomic.AddUint64(&s.current, uint64(1))) % uint64(len(s.backends))
+	return int(atomic.AddUint64(&s.current, uint64(1)) % uint64(len(s.backends)))
 }
 
 //MarkBackendStatus changes a status of a backend
@@ -156,7 +156,7 @@ func healthCheck() {
 	t := time.NewTicker(time.Minute * 2)
 	for {
 		select {
-		case <-t.c:
+		case <-t.C:
 			log.Println("Starting health check...")
 			serverPool.HealthCheck()
 			log.Println("Health check completed")
@@ -219,7 +219,7 @@ func main() {
 	// Create http server
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: http.HandleFunc(lb),
+		Handler: http.HandlerFunc(lb),
 	}
 
 	// Start health checking
